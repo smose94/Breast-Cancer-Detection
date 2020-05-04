@@ -147,7 +147,7 @@ class TabularModel(nn.Module):
         
         for i in layers:
             layerlist.append(nn.Linear(n_in,i)) 
-            layerlist.append(nn.Softmax())
+            layerlist.append(nn.ReLU())
             layerlist.append(nn.BatchNorm1d(i))
             layerlist.append(nn.Dropout(p))
             n_in = i
@@ -168,7 +168,7 @@ class TabularModel(nn.Module):
         return x
     
 #Create model instance
-model = TabularModel(emb_sizes,conts.shape[1],2, [100],p=0.2)
+model = TabularModel(emb_sizes,conts.shape[1],2, [10,15],p=0.2)
  
 #Set the cost function and fit optimisier (using ADAM)
 criterion = nn.CrossEntropyLoss() #np.sqrt(MSE) --> RMSE
