@@ -198,7 +198,7 @@ for i in range(epochs):
     losses.append(loss)
     
     if i%100 ==1:
-        print(f'Epoch: {i} loss is {loss}')
+        print(f'Epoch: {i} loss is {loss:.2f}')
     
     optimizer.zero_grad()
     loss.backward()
@@ -206,7 +206,7 @@ for i in range(epochs):
 
 
 duration = time.time() - start_time
-print(f'Training took {duration/60} minutes')
+print(f'Training took {duration/60:.2f} minutes')
     
 
 with torch.no_grad():
@@ -218,5 +218,5 @@ correct = 0
 for i in range(len(y_test)):
     if y_val[i].argmax().item() == y_test[i]:
         correct +=1
-print(f'Accuracy: {100*correct/len(y_test)}')
+print(f'Accuracy: {100*correct/len(y_test):.2f}')
 
