@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Apr 18 18:40:38 2020
+
+@author: Simon
+"""
+
+# Import required libraries
+# This classification will be performed using Pytorch
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
+from sklearn.utils import shuffle
+import datetime
+import seaborn as sns
+
+# Import the dataset
+url = 'https://github.com/smose94/Breast-Cancer-Detection/blob/master/breast-cancer.xls?raw=true'
+dataset = pd.read_excel(url)
+
+#See the count of each classification within the whole dataset
+print(dataset['Class'].value_counts())
+# We see that the dataframe has a total of 286 cases, with 201 'no-recurrence-events'...
+# and 85 recurrence-events'
+
+
+# Search for errors in the raw dataset using value_counts() on each column
+for col in dataset.columns:
+    print(dataset[col].value_counts())
+
+# Inv-node columns features 8 '?'s, decision is to drop them from dataset
+dataset = dataset.replace("?", np.nan).dropna()
+
+# Need to fix the incorrect values in the dataframe. I interpret that the date values in
+# the tumor-size column refer to the ranges 5-9 and 10-14
+# I also assume the inv-nodes column dates refer to 3-5, 6-8, 9-11, 12-14
+# First is to separate rows with datetime objects from the raw dataset
+mask = dataset['tumor-size'].apply(lambda x: isinstance(x, datetime.datetime))
+dataset_dates = dataset[mask].reset_index(drop=True)
+dataset_remain = dataset[~mask].reset_index(drop=True)
+
+for i in range(len(dataset_dates)):
+    if dataset_dates.loc[i, 'tumor-size'].strftime('%Y') == '2014':
+        dataset_dates.loc[i,'tumor-size'] = '10-14'
+    else:
+        dataset_dates.loc[i,'tumor-size'] = '5-9'
+
+#Append the amended dataframe back to old one and then repeat this process again for the inv-nodes columns
+dataset = dataset_remain.append(dataset_dates).reset_index(drop=True)
+
+# [0-2],[3-5],[6-8],[9-11].[12-14],[15-17],[24-26] outlier??
+mask = dataset['inv-nodes'].apply(lambda x: isinstance(x, datetime.datetime))
+dataset_dates = dataset[mask].reset_index(drop = True)
+dataset_remain = dataset[~mask].reset_index(drop=True)
+
+for i in range(len(dataset_dates)):
+    dataset_dates.loc[i, 'inv-nodes'] = dataset_dates.loc[i,'inv-nodes'].strftime('%m')
+    
+    if dataset_dates.loc[i,'inv-nodes'] == '05':
+        dataset_dates.loc[i,'inv-nodes'] = '3-5'
+    elif dataset_dates.loc[i,'inv-nodes'] == '08':
+        dataset_dates.loc[i,'inv-nodes'] = '6-8'
+    elif dataset_dates.loc[i,'inv-nodes'] == '11':
+        dataset_dates.loc[i,'inv-nodes'] = '9-11'
+    elif dataset_dates.loc[i,'inv-nodes'] == '12':
+        dataset_dates.loc[i,'inv-nodes'] = '12-14'
+    else:
+        pass
+    
+
+dataset = dataset_remain.append(dataset_dates).reset_index(drop=True)   
+#Shuffle the dataset
+dataset = shuffle(dataset, random_state = 101)
+dataset.reset_index(drop=True, inplace=True)
+dataset.head(10)
+
+# First look at effects of breast vs recurrence
+cols = ['age','menopause','tumor-size','inv-nodes','node-caps','deg-malig','breast','breast-quad','irradiat']
+
+"""for col in cols:
+    
+    sns.countplot(f'{col}', data=dataset, hue='Class',palette='muted')
+    ax.xlabel(f'{col}')
+    ax.ylabel('Count of Event')
+plt.title('Effect of Breast in Recurrence vs. Non-Recurrence')
+#On first apperance it seems as though there's little correlation between breast vs recurrence rate
+"""
+
+#Set up the categorical, continuous and y columns for Pytorch
+cat_cols = ['age','menopause','tumor-size','inv-nodes','node-caps','breast-quad','irradiat']
+cont_cols = ['deg-malig']
+y = dataset.pop('Class')
+
+for col in cat_cols:
+    dataset[col] = dataset[col].astype('category')
+   
+#Need to featurescale the continuous variables as well
+#Feature Scaling
+from sklearn.preprocessing import StandardScaler
+sc = StandardScaler()    
+   
+#Change to category type of columns then set as Torch Tensor
+cats = np.stack([dataset[col].cat.codes.values for col in cat_cols],1)
+
+cats = torch.tensor(cats,dtype=torch.int64)
+
+#Set up continuous variable columns as a Torch Tensor
+conts = np.stack([dataset[col].values for col in cont_cols],axis=1)
+conts = sc.fit_transform(conts)
+# Set up the cont tensor
+conts = torch.tensor(conts,dtype=torch.float)
+
+# Convert label into tensor
+# First need to map the string values of reccurence/no-recurrence to 0 or 1
+y = y.map({'no-recurrence-events':0,'recurrence-events':1})
+y = torch.tensor(y.values, dtype=torch.long).flatten()
+
+
+#Set up embedding values - this is similar to OneHotEncoding categorical values in SKLearn
+cat_sizes = [len(dataset[col].cat.categories) for col in cat_cols]
+emb_sizes = [(size,min(50,(size+1)//2)) for size in cat_sizes]
+
+# Set seed of Pytorch = to random int in order to ensure model's parameters are constant
+# This will enable me to tune model and hyperparameters and measure changes in accuracy solely based on my changes
+
+torch.manual_seed(33)
+
+
+class TabularModel(nn.Module):
+# Model takes in the embedding sizes initiliased above, number of continuous variables,
+# output layer size (e.g for classification this =2, and dropout probability e.g 0.5 = 50%)
+    def __init__(self, emb_sizes, n_cont, out_size, layers, p=0.5):
+        #This call allows us to utilise the nn.Module class already built, extending our own definitions onto it
+        super().__init__()
+        #Set up the embeddings
+        self.embeds = nn.ModuleList([nn.Embedding(ni, nf) for ni,nf in emb_sizes])
+        #Initialise a dropout function (equal to p) During training, this randomly zeros p% of the input tensor
+        self.emb_drop = nn.Dropout(p)
+        self.bn_cont = nn.BatchNorm1d(n_cont)
+        
+        layerlist = []
+        n_emb = sum((nf for ni,nf in emb_sizes))
+        n_in = n_emb + n_cont
+        
+        for i in layers:
+            layerlist.append(nn.Linear(n_in,i)) 
+            layerlist.append(nn.Softmax())
+            layerlist.append(nn.BatchNorm1d(i))
+            layerlist.append(nn.Dropout(p))
+            n_in = i
+        layerlist.append(nn.Linear(layers[-1],out_size))
+            
+        self.layers = nn.Sequential(*layerlist)
+    
+    def forward(self, x_cat, x_cont):
+        embeddings = []
+        for i,e in enumerate(self.embeds):
+            embeddings.append(e(x_cat[:,i]))
+        x = torch.cat(embeddings, 1)
+        x = self.emb_drop(x)
+        
+        x_cont = self.bn_cont(x_cont)
+        x = torch.cat([x, x_cont], 1)
+        x = self.layers(x)
+        return x
+    
+#Create model instance
+model = TabularModel(emb_sizes,conts.shape[1],2, [100],p=0.2)
+ 
+#Set the cost function and fit optimisier (using ADAM)
+criterion = nn.CrossEntropyLoss() #np.sqrt(MSE) --> RMSE
+optimizer = torch.optim.Adam(model.parameters(),lr=0.001)
+
+#Split out into a test and train set of approx 20:80 ratio
+cat_train = cats[25:]
+cat_test = cats[:25]
+con_train = conts[25:]
+con_test = conts[:25]
+
+y_train = y[25:]
+y_test = y[:25]
+
+import time
+
+start_time = time.time()
+epochs = 2500
+
+losses = []
+
+for i in range(epochs):
+    i += 1
+    
+    y_pred = model(cat_train,con_train)
+    loss = criterion(y_pred,y_train)
+    losses.append(loss)
+    
+    if i%100 ==1:
+        print(f'Epoch: {i} loss is {loss}')
+    
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+
+duration = time.time() - start_time
+print(f'Training took {duration/60} minutes')
+    
+
+with torch.no_grad():
+    y_val = model(cat_test,con_test)
+    loss = criterion(y_val, y_test)
+
+#y_pred = pd.DataFrame(np.argmax(y_val.numpy(),axis=1))
+correct = 0
+for i in range(len(y_test)):
+    if y_val[i].argmax().item() == y_test[i]:
+        correct +=1
+print(f'Accuracy: {100*correct/len(y_test)}')
+
