@@ -168,20 +168,20 @@ class TabularModel(nn.Module):
         return x
     
 #Create model instance
-model = TabularModel(emb_sizes,conts.shape[1],2, [10,15],p=0.2)
+model = TabularModel(emb_sizes,conts.shape[1],2, [5,15],p=0.2)
  
 #Set the cost function and fit optimisier (using ADAM)
 criterion = nn.CrossEntropyLoss() #np.sqrt(MSE) --> RMSE
 optimizer = torch.optim.Adam(model.parameters(),lr=0.001)
 
 #Split out into a test and train set of approx 20:80 ratio
-cat_train = cats[25:]
-cat_test = cats[:25]
-con_train = conts[25:]
-con_test = conts[:25]
+cat_train = cats[55:]
+cat_test = cats[:55]
+con_train = conts[55:]
+con_test = conts[:55]
 
-y_train = y[25:]
-y_test = y[:25]
+y_train = y[55:]
+y_test = y[:55]
 
 import time
 
